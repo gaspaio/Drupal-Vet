@@ -1,0 +1,229 @@
+<?php
+
+/*
+ * @todo go lazy on this include
+ */
+require_once 'phpunit.inc';
+
+
+/**
+ * Implements hook_permission().
+ */
+function dvet_permission() {
+  return array(
+    'access dvet tests' => array(
+      'title' => t('Access DVet pages'),
+      'description' => t('View DVet test results.'),
+    ),
+    'run dvet tests' => array(
+      'title' => t('Configure and run DVet tests.'),
+      'description' => t('Run tests and access settings form.'),
+    ),
+  );
+}
+
+
+/*
+ * Implements hook_menu().
+ */
+function dvet_menu() {
+  $items = array();
+  $items['admin/config/development/dvet'] = array(
+    'title' => 'Drupal Vet',
+    'page callback' => 'dvet_admin_page',
+    'access arguments' => array('access dvet tests'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  $items['admin/config/development/dvet/report'] = array(
+    'title' => 'Report',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => 1,
+  );
+  $items['admin/config/development/dvet/config'] = array(
+    'title' => 'Configuration',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('dvet_admin_form'),
+    'file' => 'dvet.admin.inc',
+    'access arguments' => array('run dvet tests'),
+    'type' => MENU_LOCAL_TASK,
+    'weight' => 2,
+  );
+  return $items;
+}
+
+
+/*
+ * Implements hook_theme().
+ */
+function dvet_theme($existing, $type, $theme, $path) {
+
+  $theme_file = 'dvet.theme.inc';
+  return array(
+    'dvet_results' => array(
+      'variables' => array(
+        'results' => array(),
+      ),
+      'file' => $theme_file,
+    ),
+    'dvet_log' => array(
+      'variables' => array('log' => array()),
+      'file' => $theme_file,
+    ),
+    'dvet_console' => array(
+      'variables' => array('output' => '', 'title' => ''),
+      'file' => $theme_file,
+    ),
+    'dvet_log_defaultitem' => array(
+      'variables' => array('handle' => '', 'content' => ''),
+      'file' => $theme_file,
+    ),
+  );
+}
+
+
+/**
+ * Implements hook_requirements().
+ */
+function dvet_requirements($phase) {
+  $requirements = array();
+  // Ensure translations don't break at install time
+  $t = get_t();
+
+  // Report Drupal version
+  if ($phase == 'runtime'
+      || $phase == 'install') {
+    // Test requirement
+    $requirements['phpunit'] = array(
+      'title' => $t('PHPUnit'),
+    );
+
+    if ($pu = phpunit_version()) {
+      $requirements['phpunit']['value'] = $pu['version'];
+      if ($pu['supported']) {
+        $requirements['phpunit']['severity'] = REQUIREMENT_OK;
+      }
+      else {
+        $requirements['phpunit']['description'] = $t('This version of PHPUnit is not supported, <strong>please upgrade</strong>.');
+        $requirements['phpunit']['severity'] = REQUIREMENT_WARNING;
+      }
+    }
+    else {
+      $requirements['phpunit']['value'] = $t('Not detected');
+      $requirements['phpunit']['severity'] = REQUIREMENT_WARNING;
+      $requirements['phpunit']['description'] = $t('You must install PHPUnit on your system before running tests');
+    }
+  }
+
+  return $requirements;
+}
+
+
+/**
+ * Callback for the run & review page.
+ */
+function dvet_admin_page() {
+  $phpunit_ok = TRUE;
+  $page_contents = array();
+
+  // Check that PHPUnit is present and supported
+  if ($pu = phpunit_version()) {
+    $msg = t('Detected PHPUnit version @version.', array('@version' => $pu['version']));
+    if (!$pu['supported']) {
+      $msg .= t(' This version is not supported. Please upgrade');
+      drupal_set_message($msg, 'error');
+      $phpunit_ok = FALSE;
+    }
+  }
+  else {
+    drupal_set_message(t('You must install PHPUnit before running tests'), 'error');
+    $phpunit_ok = FALSE;
+  }
+
+  // No PHPUnit - no candy
+  if (!$phpunit_ok) {
+    $page_contents[] = t('A valid PHPUnit install is necessary to run tests and present test results');
+    return $page_contents;
+  }
+
+  // The run form
+  if (user_access('run dvet tests')) {
+    $page_contents[] = drupal_get_form('dvet_run_form');
+  }
+
+  if ($results = variable_get('dvet_latest_test_results', array())) {
+
+    $page_contents[] = array(
+      '#theme' => 'dvet_results',
+      '#results' => $results,
+    );
+  }
+
+  return $page_contents;
+}
+
+
+function dvet_run_form($form, &$form_state) {
+
+  dvet_load_classes();
+  $run_settings = _dvet_run_settings();
+
+  $form['dvet_run_settings'] = array(
+    '#type' => 'fieldset',
+    '#title' => 'Run Drupal Vet tests',
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE,
+  );
+
+  $form['dvet_run_settings']['display_console'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Display PHPUnit Runner output'),
+    '#default_value' => $run_settings['display_console'],
+  );
+
+  $form['dvet_run_settings']['display_statuses'] = array(
+    '#type' => 'checkboxes',
+    '#title' => ('Show test with status:'),
+    '#options' => DVet_Util_Test::getBaseTestRunnerStatuses(),
+    '#default_value' => $run_settings['display_statuses'],
+  );
+
+
+  //@todo Add group selection
+
+  $form['submit'] = array(
+    '#type' => 'submit',
+    '#value' => 'Run tests',
+  );
+
+  return $form;
+}
+
+
+function dvet_run_form_submit($form, &$form_state) {
+
+  // Save run form status
+  $run_settings = array(
+    'display_statuses' => $form_state['values']['display_statuses'],
+    'display_console' => $form_state['values']['display_console'],
+  );
+  variable_set('dvet_run_settings', $run_settings);
+
+  if ($suites = variable_get('dvet_settings_test_suites', array())) {
+    $results = dvet_run_tests($suites);
+    $results['run_settings'] = $run_settings;
+    $results['global_settings'] = $suites;
+    variable_set('dvet_latest_test_results', $results);
+  }
+  $form_state['no_redirect'] = TRUE;
+}
+
+
+function _dvet_run_settings() {
+  dvet_load_classes();
+  $run_settings = variable_get('dvet_run_settings', array());
+  return $run_settings + array(
+    'display_statuses' => array_keys(DVet_Util_Test::getBaseTestRunnerStatuses()),
+    'display_console' => TRUE,
+  );
+}
+
