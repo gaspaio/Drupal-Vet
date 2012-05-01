@@ -3,7 +3,6 @@
 /**
  * @name Core performance settings
  * @description Drupal 7 core performance settings.
- * @group performance
  */
 class CorePerfomance_DVet_Test extends DVet_TestCase {
 
@@ -12,6 +11,7 @@ class CorePerfomance_DVet_Test extends DVet_TestCase {
   /**
    * @name Page cache
    * @description Serving cached pages for to anonymous users.
+   * @group performance
    * @passedMessage Page cache is activated. Great !
    * @failureMessage Page cache should always be activated, even with a very short lifetime.
    */
@@ -22,6 +22,7 @@ class CorePerfomance_DVet_Test extends DVet_TestCase {
   /**
    * @name Page cache lifetime
    * @description Cache lifetime determines for how long cached pages will be served from cache.
+   * @group performance
    * @depends testPageCache
    * @failureMessage Cache lifetime shoud be greated than 0 for pages to be served from cache. If a tiny lifetime is better than no lifetime.
    */
@@ -32,6 +33,7 @@ class CorePerfomance_DVet_Test extends DVet_TestCase {
   /**
    * @name Block cache
    * @description Block cache description.
+   * @group performance
    * @failureMessage Error message from block cache
    * @notes
    * - User 1 is always excluded from block cache () (block module:912)
@@ -44,6 +46,7 @@ class CorePerfomance_DVet_Test extends DVet_TestCase {
   /**
    * @name Page cache maximum age
    * @description External cache page expiration date should always be set to something greater than 0 for Drupal to set the max-age http header and thus, allow for external caching.
+   * @group performance
    * @failureMessage Set the 'Expiration of cached pages' to something greater than 0.
    * @notes
    * - see bootstrap:1330
@@ -56,21 +59,32 @@ class CorePerfomance_DVet_Test extends DVet_TestCase {
   // Page compression ? It depends on server configuration.
 
   /**
-   * @name Preprocess CSS
-   * @description TODO Describe this.
-   * @failureMessage Error message from preprocess css
+   * @name Aggregate CSS
+   * @group performance
+   * @failureMessage CSS aggregation should always be activated.
+   * @see http://www.metaltoad.com/blog/drupal-7-taking-control-css-and-js-aggregation
    */
   public function testPreprocessCSS() {
-    $this->assertTrue(variable_get('preprocess_css'));
+    $this->assertTrue((bool) variable_get('preprocess_css'));
   }
 
   /**
-   * @name Preprocess JS
-   * @description TODO Describe this.
-   * @failureMessage Error message from preprocess js
+   * @name Aggregate JS
+   * @group performance
+   * @failureMessage Javascript aggregation should always be activated.
+   * @see http://www.metaltoad.com/blog/drupal-7-taking-control-css-and-js-aggregation
    */
   public function testPreprocessJS() {
-    $msg = "Error message from preprocess js";
-    $this->assertTrue(variable_get('preprocess_js'), $msg);
+    $this->assertTrue((bool) variable_get('preprocess_js'));
   }
+
+  /**
+   * @name Update module
+   * @group performance
+   * @failureMessage The Update module should be deactivated in production sites.
+   */
+  public function testUpdateModuleDisabled() {
+    $this->assertFalse(module_exists('update'));
+  }
+
 }
